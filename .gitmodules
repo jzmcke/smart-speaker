@@ -1,0 +1,3 @@
+[submodule "lib/blob"]
+	path = lib/blob
+	url = git@github.com:jzmcke/blob.git
