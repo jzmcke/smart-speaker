@@ -2,13 +2,23 @@
 #include <stdint.h>
 #include "driver/i2s.h"
 
-#define BITWIDTH        (32)
+// #define BITWIDTH32
+#define BITWIDTH16
+
+#ifdef BITWIDTH32
+    #define BITWIDTH (32)
+    #define MAX_POS_INT 2147483647
+#else
+    #define BITWIDTH (16)
+    #define MAX_POS_INT 32767
+#endif
+
 #define BITS_PER_BYTE   (8)
 #define BYTES_PER_SAMPLE (BITWIDTH / BITS_PER_BYTE)
 
 #define N_DMA 2
 
-#define MAX_POS_INT 2147483647
+
 
 MAX98357A::MAX98357A(int i2s_port_num
                     ,int pin_sdo
@@ -31,6 +41,7 @@ MAX98357A::MAX98357A(int i2s_port_num
     // Calculate the DMA buffer size based on the expected calling cadence
     m_n_samples_per_ch = spkr_write_cadence_ms * m_sample_rate_hz / 1000;
     m_n_dma_buffers = N_DMA;
+    // This needs to be 2x m_n_samples_per_ch when there are 2 channels
     m_n_target_bytes_write = 2 * m_n_samples_per_ch * BYTES_PER_SAMPLE;
 
     // Configure the relevant parameters for the pin usage of the I2S port.
@@ -42,7 +53,7 @@ MAX98357A::MAX98357A(int i2s_port_num
     // Configure the given I2S bus to operate at the given sampling parameters
     i2s_cfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
     i2s_cfg.sample_rate = m_sample_rate_hz;
-    i2s_cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT;
+    i2s_cfg.bits_per_sample = (i2s_bits_per_sample_t)BITWIDTH;
     i2s_cfg.bits_per_chan = I2S_BITS_PER_CHAN_DEFAULT;
     i2s_cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
     i2s_cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
@@ -74,18 +85,26 @@ int MAX98357A::write(float *p_data_ch1, float *p_data_ch2)
 
     for (i=0; i<(2*m_n_samples_per_ch); i+=2)
     {
-        int32_t int_samp_ch1 = (int32_t)(p_data_ch1[i/2] * MAX_POS_INT);
-        int32_t int_samp_ch2 = (int32_t)(p_data_ch2[i/2] * MAX_POS_INT);
-
-        m_p_audio_send_bytes[i*BYTES_PER_SAMPLE + 0] = (unsigned char)(((uint32_t)int_samp_ch1 >> 24) & 0xff);
-        m_p_audio_send_bytes[i*BYTES_PER_SAMPLE + 1] = (unsigned char)(((uint32_t)int_samp_ch1 >> 16) & 0xff);
-        m_p_audio_send_bytes[i*BYTES_PER_SAMPLE + 2] = (unsigned char)(((uint32_t)int_samp_ch1 >> 8) & 0xff);
-        m_p_audio_send_bytes[i*BYTES_PER_SAMPLE + 3] = (unsigned char)(((uint32_t)int_samp_ch1 >> 0) & 0xff);
-
-        m_p_audio_send_bytes[(i+1)*BYTES_PER_SAMPLE + 0] = (unsigned char)(((uint32_t)int_samp_ch2 >> 24) & 0xff);
-        m_p_audio_send_bytes[(i+1)*BYTES_PER_SAMPLE + 1] = (unsigned char)(((uint32_t)int_samp_ch2 >> 16) & 0xff);
-        m_p_audio_send_bytes[(i+1)*BYTES_PER_SAMPLE + 2] = (unsigned char)(((uint32_t)int_samp_ch2 >> 8) & 0xff);
-        m_p_audio_send_bytes[(i+1)*BYTES_PER_SAMPLE + 3] = (unsigned char)(((uint32_t)int_samp_ch2 >> 0) & 0xff);
+        #ifdef BITWIDTH32
+            int32_t int_samp_ch1 = (int32_t)(p_data_ch1[i/2] * MAX_POS_INT);
+            int32_t int_samp_ch2 = (int32_t)(p_data_ch2[i/2] * MAX_POS_INT);
+            m_p_audio_send_bytes[i*BYTES_PER_SAMPLE + 0] = (unsigned char)(((uint32_t)int_samp_ch1 >> 24) & 0xff);
+            m_p_audio_send_bytes[i*BYTES_PER_SAMPLE + 1] = (unsigned char)(((uint32_t)int_samp_ch1 >> 16) & 0xff);
+            m_p_audio_send_bytes[i*BYTES_PER_SAMPLE + 2] = (unsigned char)(((uint32_t)int_samp_ch1 >> 8) & 0xff);
+            m_p_audio_send_bytes[i*BYTES_PER_SAMPLE + 3] = (unsigned char)(((uint32_t)int_samp_ch1 >> 0) & 0xff);
+        
+            m_p_audio_send_bytes[(i+1)*BYTES_PER_SAMPLE + 0] = (unsigned char)(((uint32_t)int_samp_ch2 >> 24) & 0xff);
+            m_p_audio_send_bytes[(i+1)*BYTES_PER_SAMPLE + 1] = (unsigned char)(((uint32_t)int_samp_ch2 >> 16) & 0xff);
+            m_p_audio_send_bytes[(i+1)*BYTES_PER_SAMPLE + 2] = (unsigned char)(((uint32_t)int_samp_ch2 >> 8) & 0xff);
+            m_p_audio_send_bytes[(i+1)*BYTES_PER_SAMPLE + 3] = (unsigned char)(((uint32_t)int_samp_ch2 >> 0) & 0xff);
+        #else
+            int16_t int_samp_ch1 = (int16_t)(p_data_ch1[i/2] * MAX_POS_INT);
+            int16_t int_samp_ch2 = (int16_t)(p_data_ch2[i/2] * MAX_POS_INT);
+            m_p_audio_send_bytes[i*BYTES_PER_SAMPLE + 0] = (unsigned char)(((uint16_t)int_samp_ch1 >> 8) & 0xff);
+            m_p_audio_send_bytes[i*BYTES_PER_SAMPLE + 1] = (unsigned char)(((uint16_t)int_samp_ch1 >> 0) & 0xff);
+            m_p_audio_send_bytes[(i+1)*BYTES_PER_SAMPLE + 0] = (unsigned char)(((uint16_t)int_samp_ch2 >> 8) & 0xff);
+            m_p_audio_send_bytes[(i+1)*BYTES_PER_SAMPLE + 1] = (unsigned char)(((uint16_t)int_samp_ch2 >> 0) & 0xff);
+        #endif
 
     }
     i2s_write((i2s_port_t)m_i2s_port_num, (void*)m_p_audio_send_bytes, m_n_target_bytes_write, &m_send_size, portMAX_DELAY);

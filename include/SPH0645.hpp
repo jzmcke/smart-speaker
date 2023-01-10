@@ -16,9 +16,9 @@ class SPH0645
         
         int read();
         bool m_b_configured = false;
-        float *m_p_ch1;
-        float *m_p_ch2;
-        size_t m_rcv_size;
+        volatile float *m_p_ch1;
+        volatile float *m_p_ch2;
+        volatile size_t m_rcv_size;
         int m_n_samples_per_ch;
     private:
         int m_pin_sdi;
@@ -28,6 +28,6 @@ class SPH0645
         int m_n_target_bytes_read;
         int m_n_dma_buffers;
         int m_i2s_port_num;
-        unsigned char *m_p_audio_rcv_bytes;
-        float *m_p_audio_rcv_float;
+        volatile unsigned char *m_p_audio_rcv_bytes;
+        volatile float *m_p_audio_rcv_float;
 };

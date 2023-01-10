@@ -75,7 +75,7 @@ int SPH0645::read()
     int i = 0;
     int foo=0;
 
-    i2s_read(I2S_NUM_0, (void*)m_p_audio_rcv_bytes, m_n_target_bytes_read, &m_rcv_size, portMAX_DELAY);
+    i2s_read(I2S_NUM_0, (void*)m_p_audio_rcv_bytes, m_n_target_bytes_read, (size_t*)&m_rcv_size, portMAX_DELAY);
  
     for (i=0; i<(m_rcv_size/BYTES_PER_SAMPLE); i+=2)
     {
