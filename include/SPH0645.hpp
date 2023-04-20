@@ -1,4 +1,6 @@
 #include <stdlib.h>
+#include "FreeRTOS.h"
+#include "freertos/queue.h"
 
 #define SPH0645_ERR (-1)
 #define SPH0645_OK  (0)
@@ -20,6 +22,7 @@ class SPH0645
         float *m_p_ch2;
         size_t m_rcv_size;
         int m_n_samples_per_ch;
+        bool b_is_input_dma_full(void);
     private:
         int m_pin_sdi;
         int m_pin_bclk;
@@ -30,4 +33,5 @@ class SPH0645
         int m_i2s_port_num;
         unsigned char *m_p_audio_rcv_bytes;
         float *m_p_audio_rcv_float;
+        QueueHandle_t m_evt_queue;
 };

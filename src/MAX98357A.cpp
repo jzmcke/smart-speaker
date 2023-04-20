@@ -3,6 +3,9 @@
 // #include <functional>
 #include "hal/i2s_types.h"
 #include "driver/i2s.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+
 
 // #define BITWIDTH32
 #define BITWIDTH16
@@ -20,14 +23,15 @@
 
 #define N_DMA 2
 
+#define QUEUE_SIZE (10)
+
 
 MAX98357A::MAX98357A(int i2s_port_num
-                          ,int pin_sdo
-                          ,int pin_bclk
-                          ,int pin_lrck
-                          ,int sample_rate_hz
-                          ,int spkr_write_cadence_ms
-                          ,void (*p_on_transmit)(void))
+                    ,int pin_sdo
+                    ,int pin_bclk
+                    ,int pin_lrck
+                    ,int sample_rate_hz
+                    ,int spkr_write_cadence_ms)
 {
     esp_err_t err = ESP_OK;
     int b_err = true;
@@ -43,8 +47,6 @@ MAX98357A::MAX98357A(int i2s_port_num
 
     // Calculate the DMA buffer size based on the expected calling cadence
     m_n_samples_per_ch = spkr_write_cadence_ms * m_sample_rate_hz / 1000;
-
-    
     m_n_dma_buffers = N_DMA;
 
     // This needs to be 2x m_n_samples_per_ch when there are 2 channels
@@ -69,7 +71,7 @@ MAX98357A::MAX98357A(int i2s_port_num
     i2s_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_DEFAULT;
     i2s_cfg.use_apll = false;
 
-    err |= i2s_driver_install((i2s_port_t)m_i2s_port_num, &i2s_cfg, 0, NULL);
+    err |= i2s_driver_install((i2s_port_t)m_i2s_port_num, &i2s_cfg, QUEUE_SIZE, &m_evt_queue);
     err |= i2s_set_pin((i2s_port_t)m_i2s_port_num, &i2s_pin_cfg);
     if (err == ESP_OK)
     {
@@ -81,6 +83,28 @@ MAX98357A::MAX98357A(int i2s_port_num
         printf("Failed to set up i2s\n");
     }
     m_p_audio_send_bytes = (unsigned char*)calloc(m_n_target_bytes_write, sizeof(unsigned char));
+}
+
+bool MAX98357A::b_is_output_dma_empty()
+{
+    i2s_event_t evt;
+    bool ret = false;
+    if (xQueueReceive(m_evt_queue, (void*)&evt, 0) == pdTRUE)
+    {
+        if (evt.type == I2S_EVENT_DMA_ERROR)
+        {
+            printf("TX DMA err!\n");
+        }
+        else if (evt.type == I2S_EVENT_TX_DONE)
+        {
+            ret = true;
+        }
+        else if (evt.type == I2S_EVENT_TX_Q_OVF)
+        {
+            ret = true;
+        }
+    }
+    return ret;
 }
 
 int MAX98357A::write(float *p_data_ch1, float *p_data_ch2)

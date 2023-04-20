@@ -6,7 +6,7 @@
 #define BYTES_PER_SAMPLE (BITWIDTH / BITS_PER_BYTE)
 
 #define N_DMA 2
-
+#define QUEUE_SIZE (10)
 
 SPH0645::SPH0645(int i2s_port_num
                 ,int pin_sdi
@@ -50,7 +50,7 @@ SPH0645::SPH0645(int i2s_port_num
     i2s_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_DEFAULT;
     i2s_cfg.use_apll = false;
 
-    err |= i2s_driver_install((i2s_port_t)m_i2s_port_num, &i2s_cfg, 0, NULL);
+    err |= i2s_driver_install((i2s_port_t)m_i2s_port_num, &i2s_cfg, QUEUE_SIZE, &m_evt_queue);
     err |= i2s_set_pin((i2s_port_t)m_i2s_port_num, &i2s_pin_cfg);
 
     if (err == ESP_OK)
@@ -68,6 +68,31 @@ SPH0645::SPH0645(int i2s_port_num
     m_p_ch1 = &m_p_audio_rcv_float[0];
     m_p_ch2 =  &m_p_audio_rcv_float[m_n_samples_per_ch];
 }
+
+
+bool SPH0645::b_is_input_dma_full()
+{
+    i2s_event_t evt;
+    bool ret = false;
+    if (xQueueReceive(m_evt_queue, (void*)&evt, 0) == pdTRUE)
+    {
+        if (evt.type == I2S_EVENT_DMA_ERROR)
+        {
+            printf("RX DMA err!\n");
+        }
+        else if (evt.type == I2S_EVENT_RX_DONE)
+        {
+            ret = true;
+        }
+        else if (evt.type == I2S_EVENT_RX_Q_OVF)
+        {
+            printf("RX DMA overflow!\n");
+            ret = true;
+        }
+    }
+    return ret;
+}
+
 
 int SPH0645::read()
 {

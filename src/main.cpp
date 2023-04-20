@@ -10,6 +10,8 @@ extern "C"
 #include "SPH0645.hpp"
 #include "MAX98357A.hpp"
 #include "Tone.hpp"
+#include "touchInput.h"
+#include <math.h>
 
 #define I2S_MIC_LRCK 4
 #define I2S_MIC_DIN 7
@@ -23,17 +25,22 @@ extern "C"
 #define LOOP_DELAY_MS   (10)
 #define N_SAMPLES_PER_LOOP (SAMPLE_RATE_HZ * LOOP_DELAY_MS / 1000)
 #define TONE_FREQUENCY_HZ (3000.0f)
-#define TONE_VOL        (0.01f)
+#define TONE_VOL        (0.1f)
 SPH0645 *p_sph0645_mic;
 MAX98357A *p_max98357a_spkr;
-Tone *p_tone;
-// Ramp *p_ramp;
+Slider *p_slider;
 
-hw_timer_t *p_timer = NULL;
+Tone *p_ch1;
+Tone *p_ch2;
 
-float *p_tone_samples = NULL;
+// Ramp *p_ch1;
+// Ramp *p_ch2;
 
 
+float a_zeros[N_SAMPLES_PER_LOOP] = {0};
+int b_wakeword_event = 0;
+float gain = 1.0f;
+// float gain = 0.5f;
 
 void
 mix(float *p_out, const float *p_arr1, const float *p_arr2, int n)
@@ -45,68 +52,113 @@ mix(float *p_out, const float *p_arr1, const float *p_arr2, int n)
 }
 
 
+void
+amplify(float *p_in_out, float gain, int n)
+{
+    for (int i = 0; i < n; i++)
+    {
+        p_in_out[i] = gain *p_in_out[i];
+    }
+}
+
+
 void onTimer()
 {
-    const float *p_forward;
+    static const float *p_forward = NULL;
     float forward = 0;
     float a_out[N_SAMPLES_PER_LOOP] = {0};
-    int n;
-    p_sph0645_mic->read();
-    p_tone_samples = p_tone->gen(TONE_VOL);    
+    int n = 0;
+    bool b_received_mic = false;
+    float *p_ch1_tone, *p_ch2_tone;
+    if (p_sph0645_mic->b_is_input_dma_full())
+    {
+        b_received_mic = true;
+        p_sph0645_mic->read();
+    }    
 
-    BLOB_RECEIVE_START("main");
-    BLOB_RECEIVE_FLOAT_A("forward", &p_forward, &n, 0);
-    BLOB_RECEIVE_FLUSH();
+    if (p_max98357a_spkr->b_is_output_dma_empty())
+    {
+        BLOB_RECEIVE_START("main");
+        BLOB_RECEIVE_FLOAT_A("forward", &p_forward, &n, 0);
+        BLOB_RECEIVE_FLUSH();
+
+        p_ch1_tone = p_ch1->gen(TONE_VOL);
+        p_ch2_tone = p_ch2->gen(TONE_VOL);
+        if (NULL != p_forward)
+        {
+            amplify((float*)p_forward, gain, N_SAMPLES_PER_LOOP);
+            p_max98357a_spkr->write((float*)p_forward, (float*)p_forward);
+            
+        }
+        else
+        {
+            amplify((float*)p_ch1_tone, gain, N_SAMPLES_PER_LOOP);
+            amplify((float*)p_ch2_tone, gain, N_SAMPLES_PER_LOOP);
+            p_max98357a_spkr->write((float*)p_ch1_tone, (float*)p_ch2_tone);
+            // p_max98357a_spkr->write((float*)a_zeros, (float*)a_zeros);
+        }
+    }
 
     
-    if (NULL != p_forward)
+    if (b_received_mic)
     {
-        // mix(a_out, p_forward, p_sph0645_mic->m_p_ch1, n);
-        // p_max98357a_spkr->write((float*)a_out, (float*)a_out);
-        p_max98357a_spkr->write((float*)p_forward, (float*)p_forward);
+        /* This network write operation is tied to the microphone DMA tick (which should be the same as the speaker DMA tick
+           if the same underlying timer is used */
+        BLOB_START("main");
+        BLOB_UNSIGNED_INT_A("rcv_bytes", &p_sph0645_mic->m_rcv_size, 1);
+        BLOB_FLOAT_A("audio", (float*)p_sph0645_mic->m_p_ch2, N_SAMPLES_PER_LOOP);
+        BLOB_INT_A("n_rcved", (int*)&n, 1);
+        BLOB_INT_A("b_wakeword_event", &b_wakeword_event, 1);
+        BLOB_FLUSH();
     }
-    else
-    {
-        p_max98357a_spkr->write((float*)p_sph0645_mic->m_p_ch1, (float*)p_sph0645_mic->m_p_ch1);
-    }
-
-    if (p_forward)
-    {
-        forward = *p_forward;
-    }
-
-    BLOB_START("main");
-    BLOB_UNSIGNED_INT_A("rcv_bytes", &p_sph0645_mic->m_rcv_size, 1);
-    BLOB_FLOAT_A("audio", (float*)p_sph0645_mic->m_p_ch1, N_SAMPLES_PER_LOOP);
-    BLOB_FLOAT_A("tone", (float*)p_tone_samples, N_SAMPLES_PER_LOOP);
-    BLOB_UNSIGNED_INT_A("send_bytes", &p_max98357a_spkr->m_send_size, 1);
-    BLOB_FLOAT_A("forward_rcved", (float*)p_forward, n);
-    BLOB_INT_A("n_rcved", (int*)&n, 1);
-    BLOB_FLUSH();
-
 }
 
-void
-output_dma_callback()
+void on_slide_release(int n)
 {
-    // Serial.println("Output DMA callback");
+    printf("on_slide_release: %d\n", n);
 }
 
-void
-input_dma_callback()
+#define SLIDER_DB_RANGE (40.0f)
+void on_slide_move(int n)
 {
-    // Serial.println("Input DMA callback");
+    gain = pow10f(((n / 100.0f) * SLIDER_DB_RANGE - SLIDER_DB_RANGE) / 20.0f);
 }
+
+void on_hold(int n)
+{
+    b_wakeword_event = 1;
+    printf("on_hold: %d\n", n);
+}
+
+void on_hold_release(int n)
+{
+    b_wakeword_event = 0;
+    printf("on_hold_release: %d\n", n);
+}
+
+void on_press(int n)
+{
+    printf("on_press: %d\n", n);
+}
+
+slider_cb_cfg_t slider_cb_cfg = {
+    .on_slide_release = on_slide_release,
+    .on_slide_move = on_slide_move,
+    .on_hold = on_hold,
+    .on_hold_release = on_hold_release,
+    .on_press = on_press
+};
 
 void setup() {
     Serial.begin(115200);
     p_sph0645_mic = new SPH0645(0, I2S_MIC_DIN, I2S_MIC_BCLK, I2S_MIC_LRCK, SAMPLE_RATE_HZ, LOOP_DELAY_MS);
-    p_max98357a_spkr = new MAX98357A(1, I2S_SPKR_DOUT, I2S_SPKR_BCLK, I2S_SPKR_LRCK, SAMPLE_RATE_HZ, LOOP_DELAY_MS, output_dma_callback);
-    p_tone = new Tone(LOOP_DELAY_MS, SAMPLE_RATE_HZ, TONE_FREQUENCY_HZ);
-    // p_ramp = new Ramp(LOOP_DELAY_MS, SAMPLE_RATE_HZ, 200.0f, 65536, 32);
-    wifi_connect();
+    p_max98357a_spkr = new MAX98357A(1, I2S_SPKR_DOUT, I2S_SPKR_BCLK, I2S_SPKR_LRCK, SAMPLE_RATE_HZ, LOOP_DELAY_MS);
+    p_ch1 = new Tone(LOOP_DELAY_MS, SAMPLE_RATE_HZ, 300);
+    p_ch2 = new Tone(LOOP_DELAY_MS, SAMPLE_RATE_HZ, 1000);
 
-    // BLOB_INIT("ws://192.168.50.115", 8000);
+    wifi_connect();
+    p_slider = new Slider();
+    p_slider->init(&slider_cb_cfg);
     BLOB_INIT(192, 168, 0, 2, 3456, 8);
 }
 
@@ -119,10 +171,5 @@ void loop()
     start_time = micros();
     onTimer();
     time_taken = micros() - start_time;
-    // Delay the loop
-    delay_us = LOOP_DELAY_MS * 1000 - time_taken;
-    if (delay_us > 0)
-    {
-        delayMicroseconds(delay_us);
-    }
+
 }
