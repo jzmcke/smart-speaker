@@ -1,0 +1,30 @@
+{
+    "authors": [
+        {
+            "maintainer": true,
+            "name": "Joseph McKee",
+            "url": "https://github.com/jzmcke"
+        }
+    ],
+    "description": "Generic data serialization and transmission for ESP32, Linux, OSX",
+    "frameworks": "arduino",
+    "keywords": "blob, websocket, web, server, client, serialization, communication, metadata, udp",
+    "license": "LGPL-2.1",
+    "name": "AsyncUDP",
+    "platforms": "espressif32",
+    "export": {
+        "exclude": [
+            "tests",
+            "frontend",
+            "js",
+            "make",
+            "script"
+        ]
+    },
+    "build":
+    {
+        "includeDir": "include",
+        "srcDir": "src"
+    },
+    "version": "1.0.0"
+}
