@@ -21,8 +21,9 @@ extern "C"
 #define I2S_SPKR_BCLK 41
 #define I2S_SPKR_DOUT 40
 
-#define SAMPLE_RATE_HZ  (16000)
+#define SAMPLE_RATE_HZ  (16000) 
 #define LOOP_DELAY_MS   (10)
+
 #define N_SAMPLES_PER_LOOP (SAMPLE_RATE_HZ * LOOP_DELAY_MS / 1000)
 #define TONE_FREQUENCY_HZ (3000.0f)
 #define TONE_VOL        (0.1f)
@@ -40,7 +41,6 @@ Tone *p_ch2;
 float a_zeros[N_SAMPLES_PER_LOOP] = {0};
 int b_wakeword_event = 0;
 float gain = 1.0f;
-// float gain = 0.5f;
 
 void
 mix(float *p_out, const float *p_arr1, const float *p_arr2, int n)
@@ -61,6 +61,16 @@ amplify(float *p_in_out, float gain, int n)
     }
 }
 
+float
+rms_calc(float *p_in_out, int n)
+{
+    float rms = 0;
+    for (int i = 0; i < n; i++)
+    {
+        rms += p_in_out[i] * p_in_out[i];
+    }
+    return sqrtf(rms / n);
+}
 
 void onTimer()
 {
@@ -70,6 +80,7 @@ void onTimer()
     int n = 0;
     bool b_received_mic = false;
     float *p_ch1_tone, *p_ch2_tone;
+    float rms = 0;
     if (p_sph0645_mic->b_is_input_dma_full())
     {
         b_received_mic = true;
@@ -78,6 +89,7 @@ void onTimer()
 
     if (p_max98357a_spkr->b_is_output_dma_empty())
     {
+        float *p_ch1_play, *p_ch2_play;
         BLOB_RECEIVE_START("main");
         BLOB_RECEIVE_FLOAT_A("forward", &p_forward, &n, 0);
         BLOB_RECEIVE_FLUSH();
@@ -87,16 +99,19 @@ void onTimer()
         if (NULL != p_forward)
         {
             amplify((float*)p_forward, gain, N_SAMPLES_PER_LOOP);
-            p_max98357a_spkr->write((float*)p_forward, (float*)p_forward);
-            
+            p_ch1_play = (float*)p_forward;
+            p_ch2_play = (float*)p_forward;
         }
         else
         {
-            amplify((float*)p_ch1_tone, gain, N_SAMPLES_PER_LOOP);
-            amplify((float*)p_ch2_tone, gain, N_SAMPLES_PER_LOOP);
-            p_max98357a_spkr->write((float*)p_ch1_tone, (float*)p_ch2_tone);
-            // p_max98357a_spkr->write((float*)a_zeros, (float*)a_zeros);
+            p_ch1_play = a_zeros;
+            p_ch2_play = a_zeros;
+            // amplify((float*)p_ch1_tone, gain, N_SAMPLES_PER_LOOP);
+            // amplify((float*)p_ch2_tone, gain, N_SAMPLES_PER_LOOP);
+            // p_max98357a_spkr->write((float*)p_ch1_tone, (float*)p_ch2_tone);
         }
+        p_max98357a_spkr->write(p_ch1_play, p_ch2_play);
+        rms = rms_calc(p_ch1_play, N_SAMPLES_PER_LOOP);
     }
 
     
@@ -106,9 +121,10 @@ void onTimer()
            if the same underlying timer is used */
         BLOB_START("main");
         BLOB_UNSIGNED_INT_A("rcv_bytes", &p_sph0645_mic->m_rcv_size, 1);
-        BLOB_FLOAT_A("audio", (float*)p_sph0645_mic->m_p_ch2, N_SAMPLES_PER_LOOP);
         BLOB_INT_A("n_rcved", (int*)&n, 1);
-        BLOB_INT_A("b_wakeword_event", &b_wakeword_event, 1);
+        BLOB_FLOAT_A("audio_ch1", (float*)p_sph0645_mic->m_p_ch1, N_SAMPLES_PER_LOOP);
+        BLOB_FLOAT_A("audio_ch2", (float*)p_sph0645_mic->m_p_ch2, N_SAMPLES_PER_LOOP);
+        BLOB_FLOAT_A("rms", &rms, 1);
         BLOB_FLUSH();
     }
 }

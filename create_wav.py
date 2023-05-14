@@ -17,13 +17,14 @@ def create_wav(log_file, out_file, fs=16000, sample_width=2):
     ds = xr.open_dataset(log_file)
 
     f = wave.open(out_file, 'w')
-    f.setnchannels(1)
+    f.setnchannels(2)
     f.setsampwidth(sample_width)
     f.setframerate(fs)
-    audio = ds['main.audio'][:, :, 0].values.flatten()
-
+    audio_ch2 = ds['main.audio_ch2'][:, :, 0].values.flatten()
+    audio_ch1 = ds['main.audio_ch1'][:, :, 0].values.flatten()
+    audio = np.stack([audio_ch1, audio_ch2])
     audio = audio * 2 ** 15
-    f.writeframes(audio.astype(np.int16).tobytes())
+    f.writeframes(audio.astype(np.int16).T.tobytes())
     f.close()
 
 if __name__ == '__main__':
